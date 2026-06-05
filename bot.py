@@ -30,25 +30,28 @@ def run():
 Thread(target=run, daemon=True).start()
 
 # ----------------------------------
-# 2) بيانات تيليجرام
+# 2) بيانات تيليجرام (من متغيرات البيئة)
 # ----------------------------------
 
-API_ID = 00000000
-API_HASH = "PUT_API_HASH_HERE"
-SESSION_FILE = "session.txt"
+API_ID = int(os.environ.get("API_ID", 0))
+API_HASH = os.environ.get("API_HASH", "")
+SESSION_STRING = os.environ.get("SESSION_STRING", "")
+
+# التحقق من صحة البيانات
+if not API_ID or not API_HASH or not SESSION_STRING:
+    print("❌ خطأ: تأكد من إضافة API_ID, API_HASH, SESSION_STRING في متغيرات البيئة")
+    exit(1)
 
 # ----------------------------------
 # 3) تحميل الجلسة
 # ----------------------------------
 
-if os.path.exists(SESSION_FILE):
-    with open(SESSION_FILE, "r", encoding="utf-8") as f:
-        session_str = f.read().strip()
-    session = StringSession(session_str)
-    print("✅ تم تحميل الجلسة")
-else:
-    session = StringSession()
-    print("⚠️ أول تشغيل - سيتم طلب رقمك")
+try:
+    session = StringSession(SESSION_STRING)
+    print("✅ تم تحميل الجلسة من متغيرات البيئة")
+except Exception as e:
+    print(f"❌ فشل تحميل الجلسة: {e}")
+    exit(1)
 
 client = TelegramClient(
     session,
@@ -140,6 +143,11 @@ async def get_common_chats_count(user_id):
         return "غير متاح"
 
 # ----------------------------------
+# 📨 وجهة الإرسال: محادثتك المحفوظة (Saved Messages)
+# ----------------------------------
+GROUP_ID = 'me'   # ✅ أرسل التقارير إلى المحادثة المحفوظة
+
+# ----------------------------------
 # معالج الرادار
 # ----------------------------------
 
@@ -176,8 +184,6 @@ async def radar_handler(event):
         url_pattern = r'(https?://\S+|www\.\S+|t\.me/\S+|@\w+)'
         if re.search(url_pattern, msg):
             return
-
-        GROUP_ID = -8487796512
 
         try:
             sender = await event.get_sender()
@@ -218,6 +224,7 @@ async def radar_handler(event):
                 f"⏱ <b>الوقت:</b> {current_time}"
             )
 
+            # ✅ إرسال التقرير إلى المحادثة المحفوظة
             await client.send_message(
                 GROUP_ID,
                 message_text,
@@ -242,10 +249,6 @@ async def main():
     while True:
         try:
             await client.start()
-
-            with open(SESSION_FILE, "w", encoding="utf-8") as f:
-                f.write(client.session.save())
-
             print("🚀 الرادار يعمل الآن باستقرار عالٍ")
 
             await client.run_until_disconnected()
@@ -256,9 +259,7 @@ async def main():
 
 if __name__ == "__main__":
     print("🚀 جاري تشغيل الرادار...")
-
     try:
         client.loop.run_until_complete(main())
-
     except KeyboardInterrupt:
         print("⛔ تم إيقاف الرادار")
