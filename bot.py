@@ -177,7 +177,7 @@ async def radar_handler(event):
         if re.search(url_pattern, msg):
             return
 
-        GROUP_ID = -1000000000000
+        GROUP_ID = -8487796512
 
         try:
             sender = await event.get_sender()
