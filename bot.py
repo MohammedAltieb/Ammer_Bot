@@ -8,31 +8,32 @@ from telethon import TelegramClient, events, functions, errors
 from telethon.sessions import StringSession
 from datetime import datetime
 
-# إعداد السجلات (Logging)
+# ----------------------------------
+# 0) إعداد السجلات (Logging)
+# ----------------------------------
 logging.basicConfig(
     format='[%(levelname) 5s/%(asctime)s] %(name)s: %(message)s',
     level=logging.WARNING
 )
 
 # ----------------------------------
-# 1) سيرفر الإنعاش (Keep Alive)
+# 1) سيرفر الإنعاش (Keep Alive) لـ Render
 # ----------------------------------
+app_flask = Flask("")
 
-app = Flask("")
-
-@app.route("/")
+@app_flask.route("/")
 def home():
     return f"🚀 الرادار شغال 24/7 - {datetime.now().strftime('%H:%M:%S')}"
 
 def run():
-    app.run(host="0.0.0.0", port=8080)
+    app_flask.run(host="0.0.0.0", port=8080)
 
+# تشغيل السيرفر في خلفية منفصلة
 Thread(target=run, daemon=True).start()
 
 # ----------------------------------
 # 2) بيانات تيليجرام (من متغيرات البيئة)
 # ----------------------------------
-
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
@@ -43,45 +44,14 @@ if not API_ID or not API_HASH or not SESSION_STRING:
     exit(1)
 
 # ----------------------------------
-# 3) تحميل الجلسة
+# 3) ثوابت الرادار
 # ----------------------------------
-
-try:
-    session = StringSession(SESSION_STRING)
-    print("✅ تم تحميل الجلسة من متغيرات البيئة")
-except Exception as e:
-    print(f"❌ فشل تحميل الجلسة: {e}")
-    exit(1)
-
-client = TelegramClient(
-    session,
-    API_ID,
-    API_HASH,
-    connection_retries=None,
-    retry_delay=5,
-    auto_reconnect=True
-)
-
-# ----------------------------------
-# منع التكرار
-# ----------------------------------
-
-processed_messages = set()
-
-# ----------------------------------
-# الكلمات الممنوعة (الإعلانات المزعجة)
-# ----------------------------------
-
 BLACKLIST_WORDS = [
     "اعذار طبية", "إجازتك", "سكليف صحتي", "اجازة مرضية", "عذر طبي", "تقارير طبية معتمدة",
     "تخفيض مخالفات", "تسديد قروض", "استخراج رخصة", "مكتب خدمات", "تصفير ضريبة",
     "استقدام", "خادمات", "شغالات", "نقل كفالة", "دفع بعد الانجاز", "مضمون 100%",
     "تواصل خاص", "رقم واتس", "للتواصل واتساب", "حياكم خاص", "تعقيب", "معقب"
 ]
-
-# ----------------------------------
-# كلمات الرادار
-# ----------------------------------
 
 KEYWORDS = [
     "تكليف","تكليفات","سكليف","تكليف واجب","تكليف منزلي","تكليف دراسي","حل التكليف","مساعدة في التكليف",
@@ -126,92 +96,82 @@ KEYWORDS = [
 ]
 
 # ----------------------------------
-# دالة العدد الدقيق
+# 4) متغيرات عامة
 # ----------------------------------
+processed_messages = set() # لمنع التكرار
+GROUP_ID = 'me' # وجهة الإرسال (محادثتك المحفوظة)
 
-async def get_common_chats_count(user_id):
+# ----------------------------------
+# 5) الدوال المساعدة (معرف المجموعات المشتركة)
+# ----------------------------------
+async def get_common_chats_count(client, user_id):
     try:
-        common = await client(
-            functions.messages.GetCommonChatsRequest(
-                user_id=user_id,
-                max_id=0,
-                limit=100
-            )
-        )
+        common = await client(functions.messages.GetCommonChatsRequest(
+            user_id=user_id,
+            max_id=0,
+            limit=100
+        ))
         return len(common.chats)
     except:
         return "غير متاح"
 
 # ----------------------------------
-# 📨 وجهة الإرسال: محادثتك المحفوظة (Saved Messages)
+# 6) الدالة الرئيسية لتشغيل الرادار
 # ----------------------------------
-GROUP_ID = 'me'   # ✅ أرسل التقارير إلى المحادثة المحفوظة
+async def main():
+    # --- بدء العميل ---
+    session = StringSession(SESSION_STRING)
+    client = TelegramClient(
+        session,
+        API_ID,
+        API_HASH,
+        connection_retries=None,
+        retry_delay=5,
+        auto_reconnect=True
+    )
 
-# ----------------------------------
-# معالج الرادار
-# ----------------------------------
-
-@client.on(events.NewMessage)
-async def radar_handler(event):
-    try:
-        if event.id in processed_messages:
-            return
-
-        processed_messages.add(event.id)
-
-        msg = (event.raw_text or "").lower()
-
-        # تجاهل الرسائل الطويلة
-        if len(msg) > 60:
-            return
-
-        # التحقق من الكلمات المفتاحية
-        if not any(keyword in msg for keyword in KEYWORDS):
-            return
-
-        import re
-
-        # 1) الكلمات الممنوعة
-        if any(black_word in msg for black_word in BLACKLIST_WORDS):
-            return
-
-        # 2) أرقام الهواتف
-        phone_pattern = r'(?:\+?966|0)?5\d{8}|(?:\+?\d{1,3}[-.\s]?)?\d{9,14}'
-        if re.search(phone_pattern, msg):
-            return
-
-        # 3) الروابط والمعرفات
-        url_pattern = r'(https?://\S+|www\.\S+|t\.me/\S+|@\w+)'
-        if re.search(url_pattern, msg):
-            return
-
+    @client.on(events.NewMessage)
+    async def radar_handler(event):
         try:
+            if event.id in processed_messages:
+                return
+            processed_messages.add(event.id)
+
+            msg = (event.raw_text or "").lower()
+            if len(msg) > 60:
+                return
+
+            # فحص الكلمات المطلوبة والممنوعة
+            if not any(k in msg for k in KEYWORDS) or any(b in msg for b in BLACKLIST_WORDS):
+                return
+
+            import re
+            # فحص الأرقام والروابط
+            if re.search(r'(?:\+?966|0)?5\d{8}|(?:\+?\d{1,3}[-.\s]?)?\d{9,14}', msg) or \
+               re.search(r'(https?://\S+|www\.\S+|t\.me/\S+|@\w+)', msg):
+                return
+
+            # استخراج تفاصيل المرسل والرسالة
             sender = await event.get_sender()
             sender_id = event.sender_id
-
-            first_name = getattr(sender, "first_name", "") or ""
+            sender_name = getattr(sender, "first_name", "") or ""
             last_name = getattr(sender, "last_name", "") or ""
-            sender_name = f"{first_name} {last_name}".strip()
-
-            if not sender_name:
+            if sender_name:
+                sender_name = f"{sender_name} {last_name}".strip()
+            else:
                 sender_name = getattr(sender, "username", None) or f"مستخدم_{sender_id}"
-
-            student_mention = (
-                f"<a href='tg://user?id={sender_id}'>{html.escape(sender_name)}</a>"
-            )
+            student_mention = f"<a href='tg://user?id={sender_id}'>{html.escape(sender_name)}</a>"
 
             chat = await event.get_chat()
             group_name = getattr(chat, "title", "غير معروف")
             group_username = getattr(chat, "username", None)
-
             if group_username:
                 original_message_link = f"https://t.me/{group_username}/{event.id}"
             else:
                 original_message_link = f"https://t.me/c/{str(event.chat_id)[4:]}/{event.id}"
-
             group_link_display = f"@{group_username}" if group_username else "بدون معرف"
 
-            mutual_groups = await get_common_chats_count(sender_id)
+            mutual_groups = await get_common_chats_count(client, sender_id)
             current_time = datetime.now().strftime("%H:%M:%S")
 
             message_text = (
@@ -220,46 +180,30 @@ async def radar_handler(event):
                 f"<a href='{original_message_link}'>{html.escape(event.raw_text)}</a>\n\n"
                 f"<b>الطالب:</b> {student_mention}\n"
                 f"📁 <b>المجموعة:</b> {group_name} ({group_link_display})\n"
-                f"📊 <b>عدد المجموعات المشتركة:</b> {mutual_groups}\n"
+                f"📊 <b>المجموعات المشتركة:</b> {mutual_groups}\n"
                 f"⏱ <b>الوقت:</b> {current_time}"
             )
 
-            # ✅ إرسال التقرير إلى المحادثة المحفوظة
-            await client.send_message(
-                GROUP_ID,
-                message_text,
-                parse_mode="html",
-                link_preview=False
-            )
+            await client.send_message(GROUP_ID, message_text, parse_mode="html", link_preview=False)
 
         except errors.FloodWaitError as e:
             await asyncio.sleep(e.seconds)
-
         except Exception as e:
-            print("⚠️ خطأ في التصميم:", e)
+            print("⚠️ خطأ في معالجة الرسالة:", e)
 
-    except Exception as e:
-        print("⚠️ خطأ:", e)
+    # --- تشغيل العميل وإبقائه حياً ---
+    await client.start()
+    print("🚀 الرادار يعمل الآن باستقرار عالٍ")
+    await client.run_until_disconnected()
 
 # ----------------------------------
-# تشغيل العميل
+# 7) تشغيل الكود
 # ----------------------------------
-
-async def main():
-    while True:
-        try:
-            await client.start()
-            print("🚀 الرادار يعمل الآن باستقرار عالٍ")
-
-            await client.run_until_disconnected()
-
-        except Exception as e:
-            print(f"⚠️ حدث انقطاع: {e}. إعادة المحاولة...")
-            await asyncio.sleep(10)
-
 if __name__ == "__main__":
     print("🚀 جاري تشغيل الرادار...")
     try:
-        client.loop.run_until_complete(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
-        print("⛔ تم إيقاف الرادار")
+        print("⛔ تم إيقاف الرادار يدوياً")
+    except Exception as e:
+        print(f"❌ حدث خطأ فادح: {e}")
